@@ -1,0 +1,88 @@
+const { test, expect } = require('@playwright/test');
+
+{% if test_data %}
+// Test data fixtures
+const testData = {{ test_data | tojson(indent=2) }};
+{% endif %}
+
+test.describe('{{ report_title }}', () => {
+  test('{{ report_description or "Generated test scenario" }}', async ({ page }) => {
+    // Set up test environment
+    await page.setViewportSize({ width: 1280, height: 720 });
+
+    {% for step in navigation_steps %}
+    // {{ step.description }}
+    {% if step.action == 'goto' %}
+    await page.goto('{{ step.value }}');
+    await page.waitForLoadState('networkidle');
+    {% endif %}
+    {% endfor %}
+
+    {% for step in form_steps %}
+    // {{ step.description }}
+    {% if step.type == 'input' %}
+    await {{ step.selector }}.fill('{{ step.value }}');
+    {% elif step.type == 'click' %}
+    await {{ step.selector }}.click();
+    {% endif %}
+    {% endfor %}
+
+    {% for step in api_steps %}
+    // {{ step.description }}
+    {% if step.type == 'api_verification' %}
+    // Verify API call structure
+    await page.waitForResponse(response =>
+      response.url().includes('{{ step.url | regex_replace("https?://[^/]+", "") }}') &&
+      response.status() === {{ step.expected_status }}
+    );
+    {% endif %}
+    {% endfor %}
+
+    {% for assertion in assertions %}
+    // {{ assertion.description }}
+    {% if assertion.type == 'page_load' %}
+    {{ assertion.assertion }}
+    {% elif assertion.type == 'error_check' %}
+    {{ assertion.assertion }}
+    {% endif %}
+    {% endfor %}
+
+    // Additional wait for any async operations
+    await page.waitForTimeout(1000);
+  });
+
+  {% if test_data.api_payloads %}
+  test('API Integration Tests', async ({ page }) => {
+    {% for payload in test_data.api_payloads %}
+    // Test API endpoint: {{ payload.url }}
+    const apiResponse = await page.request.{{ payload.method | lower }}('{{ payload.url }}', {
+      data: {{ payload.body | tojson }}
+    });
+    expect(apiResponse.status()).toBe(200);
+    {% endfor %}
+  });
+  {% endif %}
+});
+
+// Helper functions
+async function waitForElement(page, selector, timeout = 5000) {
+  try {
+    await page.waitForSelector(selector, { timeout });
+    return true;
+  } catch (error) {
+    console.warn(`Element not found: ${selector}`);
+    return false;
+  }
+}
+
+async function safeClick(page, selector) {
+  if (await waitForElement(page, selector)) {
+    await page.click(selector);
+  }
+}
+
+async function safeFill(page, selector, value) {
+  if (await waitForElement(page, selector)) {
+    await page.fill(selector, value);
+  }
+}

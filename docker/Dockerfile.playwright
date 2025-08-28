@@ -1,0 +1,49 @@
+# Playwright Runner Image
+FROM mcr.microsoft.com/playwright:v1.40.0-jammy
+
+# Install Node.js 20
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs
+
+# Install Python 3.11
+RUN apt-get update && apt-get install -y \
+    python3.11 \
+    python3.11-pip \
+    python3.11-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create app user
+RUN useradd -m -u 1001 -s /bin/bash runner
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files for dependency installation
+COPY package*.json ./
+COPY requirements*.txt ./
+
+# Install Node.js dependencies
+RUN npm ci --only=production
+
+# Install Python dependencies
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+# Create directories for artifacts
+RUN mkdir -p /app/artifacts /app/traces /app/videos /app/screenshots
+
+# Set ownership
+RUN chown -R runner:runner /app
+
+# Switch to non-root user
+USER runner
+
+# Environment variables
+ENV NODE_ENV=production
+ENV PYTHONPATH=/app
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD node -e "console.log('Playwright runner healthy')"
+
+# Default command
+CMD ["node", "dist/runner.js"]

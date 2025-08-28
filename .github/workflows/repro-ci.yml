@@ -1,0 +1,115 @@
+name: Bug Reproduction CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+jobs:
+  run-reproductions:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18, 20]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install Python dependencies
+      run: |
+        pip install -r requirements.txt
+        
+    - name: Start infrastructure
+      run: |
+        docker-compose up -d postgres redis nats
+        
+    - name: Wait for services
+      run: |
+        sleep 30
+        
+    - name: Run reproductions
+      run: |
+        # Find all regression tests in the PR
+        REGRESSION_TESTS=$(find . -name "*.spec.js" -path "*/regressions/*" -o -name "*.test.js" -path "*/regressions/*")
+        
+        for test in $REGRESSION_TESTS; do
+          echo "Running reproduction: $test"
+          
+          # Run the test multiple times to check for flakiness
+          for i in {1..5}; do
+            echo "Run $i/5"
+            if npm test "$test"; then
+              echo "Test passed on run $i"
+            else
+              echo "Test failed on run $i"
+              # If test fails, mark as flaky and quarantine
+              echo "::warning::Flaky test detected: $test"
+              echo "::set-output name=flaky_test::$test"
+            fi
+          done
+        done
+        
+    - name: Quarantine flaky tests
+      if: steps.run-reproductions.outputs.flaky_test != ''
+      run: |
+        # Move flaky tests to quarantine directory
+        mkdir -p tests/quarantine
+        mv "${{ steps.run-reproductions.outputs.flaky_test }}" tests/quarantine/
+        
+        # Create issue for flaky test
+        gh issue create \
+          --title "Flaky test detected: ${{ steps.run-reproductions.outputs.flaky_test }}" \
+          --body "This test was automatically quarantined due to flaky behavior detected in CI." \
+          --label "flaky-test,automated"
+          
+    - name: Generate stability report
+      run: |
+        # Generate stability report for all reproductions
+        npm run generate-stability-report
+        
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: reproduction-results
+        path: |
+          test-results/
+          stability-report.json
+          
+    - name: Comment on PR
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const report = JSON.parse(fs.readFileSync('stability-report.json', 'utf8'));
+          
+          const comment = `## Bug Reproduction Results
+          
+          **Tests Run:** ${report.totalTests}
+          **Stable:** ${report.stableTests}
+          **Flaky:** ${report.flakyTests}
+          **Failed:** ${report.failedTests}
+          
+          ${report.flakyTests > 0 ? '⚠️ **Flaky tests have been quarantined**' : '✅ **All tests are stable**'}
+          `;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });

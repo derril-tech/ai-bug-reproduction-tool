@@ -1,0 +1,243 @@
+version: '3.8'
+
+services:
+  # Playwright Runner
+  playwright-runner:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.playwright
+    container_name: ai-bug-repro-playwright-runner
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - NATS_URL=nats://nats:4222
+      - S3_ENDPOINT=http://minio:9000
+      - S3_ACCESS_KEY=minioadmin
+      - S3_SECRET_KEY=minioadmin
+    volumes:
+      - playwright_artifacts:/app/artifacts
+    depends_on:
+      - redis
+      - nats
+      - minio
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:3001/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Python Workers
+  ingest-worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.python-worker
+    container_name: ai-bug-repro-ingest-worker
+    restart: unless-stopped
+    environment:
+      - PYTHONPATH=/app/workers/ingest-worker
+      - REDIS_URL=redis://redis:6379
+      - NATS_URL=nats://nats:4222
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/bug_repro
+    volumes:
+      - ./workers/ingest-worker:/app/workers/ingest-worker:ro
+    depends_on:
+      - redis
+      - nats
+      - postgres
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+    healthcheck:
+      test: [ "CMD", "python", "-c", "print('healthy')" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  signal-worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.python-worker
+    container_name: ai-bug-repro-signal-worker
+    restart: unless-stopped
+    environment:
+      - PYTHONPATH=/app/workers/signal-worker
+      - REDIS_URL=redis://redis:6379
+      - NATS_URL=nats://nats:4222
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/bug_repro
+    volumes:
+      - ./workers/signal-worker:/app/workers/signal-worker:ro
+    depends_on:
+      - redis
+      - nats
+      - postgres
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+    healthcheck:
+      test: [ "CMD", "python", "-c", "print('healthy')" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  map-worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.python-worker
+    container_name: ai-bug-repro-map-worker
+    restart: unless-stopped
+    environment:
+      - PYTHONPATH=/app/workers/map-worker
+      - REDIS_URL=redis://redis:6379
+      - NATS_URL=nats://nats:4222
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/bug_repro
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    volumes:
+      - ./workers/map-worker:/app/workers/map-worker:ro
+    depends_on:
+      - redis
+      - nats
+      - postgres
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+    healthcheck:
+      test: [ "CMD", "python", "-c", "print('healthy')" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  synth-worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.python-worker
+    container_name: ai-bug-repro-synth-worker
+    restart: unless-stopped
+    environment:
+      - PYTHONPATH=/app/workers/synth-worker
+      - REDIS_URL=redis://redis:6379
+      - NATS_URL=nats://nats:4222
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/bug_repro
+    volumes:
+      - ./workers/synth-worker:/app/workers/synth-worker:ro
+    depends_on:
+      - redis
+      - nats
+      - postgres
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+    healthcheck:
+      test: [ "CMD", "python", "-c", "print('healthy')" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  validate-worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.python-worker
+    container_name: ai-bug-repro-validate-worker
+    restart: unless-stopped
+    environment:
+      - PYTHONPATH=/app/workers/validate-worker
+      - REDIS_URL=redis://redis:6379
+      - NATS_URL=nats://nats:4222
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/bug_repro
+    volumes:
+      - ./workers/validate-worker:/app/workers/validate-worker:ro
+      - validate_artifacts:/app/artifacts
+    depends_on:
+      - redis
+      - nats
+      - postgres
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 2G
+          cpus: '1.0'
+    healthcheck:
+      test: [ "CMD", "python", "-c", "print('healthy')" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  export-worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.python-worker
+    container_name: ai-bug-repro-export-worker
+    restart: unless-stopped
+    environment:
+      - PYTHONPATH=/app/workers/export-worker
+      - REDIS_URL=redis://redis:6379
+      - NATS_URL=nats://nats:4222
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/bug_repro
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - S3_ENDPOINT=http://minio:9000
+      - S3_ACCESS_KEY=minioadmin
+      - S3_SECRET_KEY=minioadmin
+    volumes:
+      - ./workers/export-worker:/app/workers/export-worker:ro
+    depends_on:
+      - redis
+      - nats
+      - postgres
+      - minio
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+    healthcheck:
+      test: [ "CMD", "python", "-c", "print('healthy')" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  playwright_artifacts:
+    driver: local
+  validate_artifacts:
+    driver: local

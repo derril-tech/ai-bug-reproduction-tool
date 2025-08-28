@@ -1,0 +1,44 @@
+# NestJS API Production Image
+FROM node:20-alpine AS base
+
+# Install dumb-init for proper signal handling
+RUN apk add --no-cache dumb-init
+
+# Create app user
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 appuser
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY apps/api/package*.json ./
+
+# Install dependencies
+RUN npm ci --only=production && npm cache clean --force
+
+# Copy built application
+COPY --chown=appuser:nodejs apps/api/dist ./dist
+
+# Create directories for logs
+RUN mkdir -p /app/logs && chown -R appuser:nodejs /app/logs
+
+# Switch to non-root user
+USER appuser
+
+# Environment variables
+ENV NODE_ENV=production
+ENV PORT=4000
+
+# Expose port
+EXPOSE 4000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD node -e "require('http').get('http://localhost:4000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"
+
+# Use dumb-init to handle signals properly
+ENTRYPOINT ["dumb-init", "--"]
+
+# Start the application
+CMD ["node", "dist/main.js"]

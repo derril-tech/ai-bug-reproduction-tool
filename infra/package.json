@@ -1,0 +1,24 @@
+{
+    "name": "@ai-bug-repro/infra",
+    "version": "0.1.0",
+    "description": "Infrastructure scripts and configurations for AI Bug Reproduction Tool",
+    "private": true,
+    "scripts": {
+        "migrate": "node scripts/migrate.js",
+        "migrate:create": "node scripts/create-migration.js",
+        "seed": "node scripts/seed.js",
+        "db:reset": "node scripts/reset.js",
+        "db:backup": "node scripts/backup.js",
+        "db:restore": "node scripts/restore.js"
+    },
+    "dependencies": {
+        "pg": "^8.11.0",
+        "redis": "^4.6.0",
+        "dotenv": "^16.3.0"
+    },
+    "devDependencies": {
+        "@types/pg": "^8.10.0",
+        "@types/node": "^20.10.0",
+        "typescript": "^5.3.0"
+    }
+}

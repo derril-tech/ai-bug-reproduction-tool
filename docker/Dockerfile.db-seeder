@@ -1,0 +1,37 @@
+# Database Seeder Image
+FROM python:3.11-slim
+
+# Install PostgreSQL client
+RUN apt-get update && apt-get install -y \
+    postgresql-client \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create app user
+RUN useradd -m -u 1001 -s /bin/bash seeder
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements and scripts
+COPY requirements.txt ./
+COPY infra/scripts/seed.js ./
+COPY infra/init.sql ./
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Create seed data directory
+RUN mkdir -p /app/seed-data
+
+# Set ownership
+RUN chown -R seeder:seeder /app
+
+# Switch to non-root user
+USER seeder
+
+# Environment variables
+ENV PYTHONPATH=/app
+
+# Default command - runs seeder script
+CMD ["python", "-c", "import os; print('Database seeder ready')"]
